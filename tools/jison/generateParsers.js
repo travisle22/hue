@@ -105,7 +105,7 @@ const execCmd = (cmd) => new Promise((resolve, reject) => {
     if (err) {
       reject('stderr:\n' + stderr + '\n\nstdout:\n' + stdout);
     }
-    resolve();
+    resolve(stdout);
   });
 });
 
@@ -137,7 +137,11 @@ const generateParser = parserName => new Promise((resolve, reject) => {
     }
     jisonCommand += ' -m js';
     console.log('Generating parser...');
-    execCmd(jisonCommand).then(() => {
+    execCmd(jisonCommand).then((stdout) => {
+      if (/\S/.test(stdout)) {
+        console.log('got output for: ' + jisonCommand);
+        console.log(stdout);
+      }
       if (parserConfig.sources.length > 1) {
         deleteFile(targetPath); // Remove concatenated file
       }
