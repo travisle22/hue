@@ -40,6 +40,9 @@ const SQL_STATEMENTS_PARSER_JSDOC = '/**\n' +
   ' */\n';
 
 const JISON_FOLDER = 'desktop/core/src/desktop/js/parse/jison/';
+const SQL_PARSER_REPOSITORY_PATH = 'desktop/core/src/desktop/js/parse/sql/sqlParserRepository.js';
+const SYNTAX_PARSER_IMPORT_TEMPLATE = '  KEY: () => import(/* webpackChunkName: "KEY-parser" */ \'parse/sql/KEY/KEYSyntaxParser\')';
+const AUTOCOMPLETE_PARSER_IMPORT_TEMPLATE = '  KEY: () => import(/* webpackChunkName: "KEY-parser" */ \'parse/sql/KEY/KEYAutocompleteParser\')';
 
 let parserDefinitions = {
   globalSearchParser: {
@@ -152,7 +155,6 @@ const generateParser = parserName => new Promise((resolve, reject) => {
         parserConfig.afterParse(contents).then(finalContents => {
           writeFile(parserConfig.outputFolder + generatedJsFileName, finalContents).then(() => {
             deleteFile(generatedJsFileName);
-            console.log('Done!\n');
             resolve();
           }).catch(reject);
         }).catch(reject);
@@ -182,6 +184,7 @@ const findParser = (fileIndex, folder, sharedFiles, autocomplete) => {
       sources: ['sql/' + folder + '/' + prefix + '_header.jison'].concat(sharedFiles),
       lexer: 'sql/' + folder + '/sql.jisonlex',
       target: 'sql/' + folder + '/' + parserName + '.jison',
+      sqlParser: autocomplete ? 'AUTOCOMPLETE' : 'SYNTAX',
       outputFolder: 'desktop/core/src/desktop/js/parse/sql/' + folder + '/',
       afterParse: (contents) => new Promise(resolve => {
         resolve(LICENSE +
@@ -272,6 +275,24 @@ identifySqlParsers().then(() => {
       generateParser(parserName).then(generateRecursive).catch(error => {
         console.log(error);
         console.log('FAIL!');
+      })
+    } else {
+      const autocompParsers = [];
+      const syntaxParsers = [];
+      console.log('Updating sqlParserRepository.js...');
+      Object.keys(parserDefinitions).forEach(key => {
+        if (parserDefinitions[key].sqlParser === 'AUTOCOMPLETE') {
+          autocompParsers.push(AUTOCOMPLETE_PARSER_IMPORT_TEMPLATE.replace(/KEY/g, key.replace('AutocompleteParser', '')));
+        } else if (parserDefinitions[key].sqlParser === 'SYNTAX') {
+          syntaxParsers.push(SYNTAX_PARSER_IMPORT_TEMPLATE.replace(/KEY/g, key.replace('SyntaxParser', '')));
+        }
+      });
+      readFile(SQL_PARSER_REPOSITORY_PATH).then(contents => {
+        contents = contents.replace(/const SYNTAX_MODULES = [^}]+}/, 'const SYNTAX_MODULES = {\n' + syntaxParsers.join(',\n') + '\n}');
+        contents = contents.replace(/const AUTOCOMPLETE_MODULES = [^}]+}/, 'const AUTOCOMPLETE_MODULES = {\n' + autocompParsers.join(',\n') + '\n}');
+        writeFile(SQL_PARSER_REPOSITORY_PATH, contents).then(() => {
+          console.log('Done!\n');
+        })
       })
     }
   };
