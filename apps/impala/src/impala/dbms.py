@@ -26,7 +26,9 @@ from beeswax.server.dbms import HiveServer2Dbms, QueryServerException, QueryServ
   get_query_server_config as beeswax_query_server_config
 
 from desktop.conf import CLUSTER_ID
+from desktop.models import Cluster, ClusterConfig
 from impala import conf
+from notebook.conf import get_ordered_interpreters
 
 
 LOG = logging.getLogger(__name__)
@@ -92,24 +94,35 @@ class ImpalaDbms(HiveServer2Dbms):
     return 'SELECT histogram(%s) FROM %s' % (select_clause, from_clause)
 
 
+  def has_hive_metastore(self):
+    cluster_type = Cluster(self.client.user).get_type()
+    cluster_config = ClusterConfig(self.client.user, cluster_type=cluster_type)
+    return cluster_config.has_hive_metastore()
+
   def invalidate(self, database=None, table=None, flush_all=False):
     handle = None
 
     try:
-      if flush_all or database is None:
-        hql = "INVALIDATE METADATA"
-        query = hql_query(hql, query_type=QUERY_TYPES[1])
-        handle = self.execute_and_wait(query, timeout_sec=10.0)
-      elif table is None:
-        diff_tables = self._get_different_tables(database)
-        for table in diff_tables:
+      if not flush_all:
+        if database and table:
           hql = "INVALIDATE METADATA `%s`.`%s`" % (database, table)
           query = hql_query(hql, query_type=QUERY_TYPES[1])
           handle = self.execute_and_wait(query, timeout_sec=10.0)
-      else:
-        hql = "INVALIDATE METADATA `%s`.`%s`" % (database, table)
-        query = hql_query(hql, query_type=QUERY_TYPES[1])
-        handle = self.execute_and_wait(query, timeout_sec=10.0)
+          return
+        elif database and self.has_hive_metastore():
+          diff_tables = self._get_different_tables(database)
+          if len(diff_tables) <= 10:
+            for table in diff_tables:
+              hql = "INVALIDATE METADATA `%s`.`%s`" % (database, table)
+              query = hql_query(hql, query_type=QUERY_TYPES[1])
+              handle = self.execute_and_wait(query, timeout_sec=10.0)
+            return
+          else:
+            LOG.warn('Did not delta invalidate, because len(diff_tables) = %s' % str(len(diff_tables)))
+
+      hql = "INVALIDATE METADATA"
+      query = hql_query(hql, query_type=QUERY_TYPES[1])
+      handle = self.execute_and_wait(query, timeout_sec=10.0)
     except QueryServerTimeoutException, e:
       # Allow timeout exceptions to propagate
       raise e
@@ -170,7 +183,8 @@ class ImpalaDbms(HiveServer2Dbms):
 
 
   def _get_beeswax_tables(self, database):
-    beeswax_query_server = dbms.get(user=self.client.user, query_server=beeswax_query_server_config(name='beeswax'))
+    interpreters = ['beeswax' if interpreter == 'hive' else interpreter for interpreter in self.has_hive_metastore()]
+    beeswax_query_server = dbms.get(user=self.client.user, query_server=beeswax_query_server_config(name=interpreters[0]))
     return beeswax_query_server.get_tables(database=database)
 
 

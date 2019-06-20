@@ -488,3 +488,7 @@ class TestImpalaDbms():
                  ('order_date', '`default`.`customers`.`orders`'))
     assert_equal(ImpalaDbms.get_nested_select('default', 'customers', 'orders', 'item/items/item/product_id'),
                  ('product_id', '`default`.`customers`.`orders`.`items`'))
+
+  def test_invalidate(self):
+    ddms = ImpalaDbms(None,'')
+    ddms.invalidate('default')
