@@ -23,6 +23,7 @@ import re
 import tempfile
 import urllib
 import urlparse
+from time import sleep
 from avro import schema, datafile, io
 
 from aws.s3.s3fs import S3FileSystemException
@@ -46,6 +47,7 @@ from conf import MAX_SNAPPY_DECOMPRESSION_SIZE
 from lib.rwx import expand_mode
 from views import snappy_installed
 from nose import SkipTest
+from celery.utils import time
 
 
 LOG = logging.getLogger(__name__)
@@ -967,43 +969,42 @@ alert("XSS")
     ENABLE_EXTRACT_UPLOADED_ARCHIVE.set_for_testing(True)
     prefix = self.cluster.fs_prefix + '/test_compress_files'
     self.cluster.fs.mkdir(prefix)
-
-    test_dir1 = prefix + '/test_dir1'
-    self.cluster.fs.mkdir(test_dir1)
-    self.cluster.fs.chown(test_dir1, 'test')
-    self.cluster.fs.chmod(test_dir1, 0700)
+    
+    test_directories = ["test_dir1", "test dir2",  "test\tdir3", "testdir4" ]
+    for temp_directories in test_directories:
+        test_dir1 = prefix + "/" + temp_directories
+        test_file = test_dir1 + '/test.txt'
+        self.cluster.fs.mkdir(test_dir1)
+        self.cluster.fs.chown(test_dir1, 'test')
+        self.cluster.fs.chmod(test_dir1, 0700)
+        for i in range(3) :
+            f = self.cluster.fs.open(test_file + "%s" %i, "w")
+            f.close()
+    
     """
     test_dir2 = prefix + '/test_dir2'
+    test_file = test_dir2 + '/test.txt'
     self.cluster.fs.mkdir(test_dir2)
     self.cluster.fs.chown(test_dir2, 'test')
     self.cluster.fs.chmod(test_dir2, 0700)
+    for i in range(5) :
+        f = self.cluster.fs.open(test_file + "%s" %i, "w")
+        f.close()
     """
     try:
-      resp = self.c.post('/filebrowser/compress_files', {'upload_path': prefix, 'files[]': ['test_dir1'], 'archive_name': 'test_compress.zip'})
-      response = json.loads(resp.content)
-      assert_equal(0, response['status'], response)
-      assert_true('handle' in response and response['handle']['id'], response)
-      responseid = "\"" + response['handle']['id'] + "\"" 
-      while True:
-        """
-        resp2 = self.c.post('/jobbrowser/api/jobs/workflows', {"interface": ["workflows"], "filters": [{"text":""},{"time":{"time_value":7,"time_unit":"days"}},{"states":[]},{"pagination":{"page":1,"offset":1,"limit":100}}]}) #error here
-        response2 = json.loads(resp2.content)
-        #assert_equal(0, response2['status'], response2)
-        for resp_app in response2['apps'] :
-            if resp_app["id"] == response2['handle']['id'] :
-                if resp_app['status'] == "RUNNING":
-                    break
-                assert_true(['status'] == "SUCCEEDED" , response2)
-                isnotrunning = False
-                break
-        
-        """
-        
-        resp2 = self.c.post('/jobbrowser/api/job/workflows', {"interface": '"workflows"', "app_id": responseid}) #error here
-        response2 = json.loads(resp2.content)
-        if response2["app"]['status'] != "RUNNING" :
-            assert_true(response2["app"]["status"] == "SUCCEEDED" ,resp2)
-            break 
+      for temp_directories in test_directories :
+          resp = self.c.post('/filebrowser/compress_files', {'upload_path': prefix, 'files[]': [temp_directories], 'archive_name': 'test_compress.zip'})
+          response = json.loads(resp.content)
+          assert_equal(0, response['status'], response)
+          assert_true('handle' in response and response['handle']['id'], response)
+          responseid = "\"" + response['handle']['id'] + "\"" 
+          while True:
+            resp2 = self.c.post('/jobbrowser/api/job/workflows', {"interface": '"workflows"', "app_id": responseid}) #error here
+            response2 = json.loads(resp2.content)
+            if response2["app"]['status'] != "RUNNING" :
+                assert_equal(response2["app"]["status"] , "SUCCEEDED", response2)
+                break 
+            sleep(3)
     finally:
       ENABLE_EXTRACT_UPLOADED_ARCHIVE.set_for_testing(False)
       cleanup_tree(self.cluster, prefix)
